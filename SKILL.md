@@ -23,13 +23,25 @@ angetastet.
 ```bash
 cd ~/.hermes/tools/jev-compaction
 export TYPESAFE_API_KEY="$(grep '^TYPESAFE_API_KEY=' ~/.hermes/.env | head -1 | cut -d= -f2-)"
-node hermes-compact.mjs ~/.hermes/sessions/<session>.json            # Probelauf
-node hermes-compact.mjs ~/.hermes/sessions/<session>.json --out out/<name>.json
+
+node hermes-compact.mjs --find steuerberatung                 # Sitzung suchen
+node hermes-compact.mjs --session <id>                        # Probelauf
+node hermes-compact.mjs --session <id> --out out/<name>.json   # schreiben
+node hermes-compact.mjs ~/.hermes/sessions/<session>.json      # Legacy-JSON
 ```
+
+**Sitzungen liegen in `~/.hermes/state.db`, nicht in JSON-Dateien.** Die Dateien
+unter `~/.hermes/sessions/` sind ein Legacy-Spiegel, der im Mai 2026 endet; alle
+neueren und langen Sitzungen stehen nur in der Datenbank (Tabellen `sessions`
+und `messages`). Ohne `--session` sucht man in veralteten Sitzungen.
 
 Optionen: `--threshold` (Standard 0.5), `--preserve` (neueste unberührte
 Nachrichten, Standard 6), `--truncate` (Zeichen, die von einem verworfenen
-Ergebnis erhalten bleiben, Standard 300). Ohne `--out` wird nichts geschrieben.
+Ergebnis erhalten bleiben, Standard 300), `--db <pfad>`, `--active-only` (nur
+`active = 1`, also der lebende Kontext), `--dump <datei>` (alle Urteile mit
+Wahrscheinlichkeiten). Ohne `--out` wird nichts geschrieben.
+
+Die Datenbank wird ausschliesslich gelesen; zurückgeschrieben wird nie.
 
 Der Probelauf schreibt nie — erst messen, dann entscheiden.
 
@@ -81,12 +93,41 @@ Kontext der Aufgabe, nicht über einen Auszug.
 
 | Sitzung | Tool-Calls | Nachrichten | Zeichen | Reduktion | Konsistenz |
 | --- | --- | --- | --- | --- | --- |
+| steuerberatung.ch (state.db) | 1143 | 2755 → 1268 | 4'127'809 → 1'321'047 | 68.0 % | 0 verwaiste |
 | Browser-Automatik | 1128 | 2242 → 17 | 921'326 → 14'379 | 98.4 % | 0 verwaiste |
 | gemischt, substanziell | 116 | 236 → 11 | — | 96.5 % | 0 verwaiste |
 | substanziell | 54 | 82 → 11 | — | 91.6 % | 0 verwaiste |
 | klein | 53 | 97 → 12 | 277'847 → 67'053 | 75.9 % | 0 verwaiste |
 
-In allen Läufen: `verwaiste = 0` und `Integrität = true`.
+In allen Läufen: keine verwaisten Ergebnisse, `Integrität = true`, und beim
+Steuerberatung-Lauf alle 139 zustandsändernden Calls erhalten (`patch` 76,
+`write_file` 36, `memory` 17, `skill_manage` 10) bei wortgleichem Text.
+
+### Zwei Arten, wie ein echter Verlauf täuscht
+
+Beide erst beim Lauf gegen eine echte Sitzung mit 3'845 Nachrichten gefunden —
+und beide erzeugten vorher ein falsches Ergebnis. Keine davon ist ein Jev-Problem.
+
+**1. Die DB enthält mehrere Generationen derselben Unterhaltung.** Alle Zeilen in
+`id`-Reihenfolge zu laden ergab eine Unterhaltung, die es nie gab: 1'852
+Ergebnisse bei nur 1'127 verschiedenen Call-IDs (682 zweimal, 22 dreimal), und
+von 3'818 Nachrichten waren nur **206 als `active = 1`** markiert — alle am Ende.
+Wiederholungen und Rewinds legen denselben Call erneut ab. Der erste Versuch
+meldete **613 verwaiste Ergebnisse** und beurteilte nur 61 % der Calls. Fix: jede
+`tool_call_id` und jeden Call genau einmal, jeweils die erste Fassung — und
+ausweisen, wie viele Zeilen das übersprungen hat.
+
+**2. Das letzte Fenster ist das lebende Ende, nicht alte Historie.** Der
+Fenstermodus lief anfangs in *jedem* Fenster mit `--preserve 1`. Für alle Fenster
+ausser dem letzten ist das richtig; das letzte enthält das lebende Ende der
+Sitzung. Genau daran ging ein Ergebnis aus einer `active = 1`-Nachricht
+verloren — der Call blieb, das Ergebnis nicht. Jetzt behält das letzte Fenster
+das volle `--preserve`, und die Invariante wird zusätzlich nachgezogen statt dem
+ordnungshasierten Pairing der Bibliothek vertraut.
+
+Ein Call ohne Ergebnis ist **keine** Beschädigung: so steht er in der Quelle
+(abgebrochener Turn). Er wird als aus der Quelle übernommen ausgewiesen, nicht
+als Fehler.
 
 ### Die Quote allein sagt nichts
 

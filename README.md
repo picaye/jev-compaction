@@ -65,16 +65,30 @@ file by this tool.
 
 ## Usage
 
+Sessions live in `~/.hermes/state.db` (tables `sessions` and `messages`). The
+JSON files under `~/.hermes/sessions/` are a **legacy mirror that ends in May
+2026** — modern, long sessions are only in the database.
+
 ```sh
-# dry run — measures, writes nothing
-node hermes-compact.mjs ~/.hermes/sessions/session_<id>.json
+# find a session
+node hermes-compact.mjs --find steuerberatung
+
+# dry run by session id — measures, writes nothing
+node hermes-compact.mjs --session 20260914_211401_391d8abe
 
 # write the compacted transcript
-node hermes-compact.mjs ~/.hermes/sessions/session_<id>.json --out out/compacted.json
+node hermes-compact.mjs --session 20260914_211401_391d8abe --out out/compacted.json
+
+# a legacy JSON file still works
+node hermes-compact.mjs ~/.hermes/sessions/session_<id>.json
 ```
 
 Options:
 
+- `--session <id>` — read from the state database (default `~/.hermes/state.db`)
+- `--db <path>` — another database
+- `--find <text>` — list matching sessions with their tool-call counts
+- `--active-only` — only rows flagged `active = 1`, i.e. the live context
 - `--out <file>` — write the compacted session (default: dry run, nothing written)
 - `--threshold <n>` — keep probability required to keep (default `0.5`)
 - `--preserve <n>` — newest messages never touched (default `6`)
@@ -82,7 +96,8 @@ Options:
 - `--goal <text>` — ongoing task description (default: derived from the session)
 - `--dump <file>` — write every decision with its `keepCall`/`keepResult`
 
-Always dry-run first. The report is the point.
+The database is only ever read. Nothing is written back to it; output is a JSON
+file.
 
 ## What the report tells you
 
@@ -164,13 +179,58 @@ Two pitfalls when windowing:
 - **Short ids collide.** Every request restarts at `t1, t2, …`, so verdicts from
   several windows must be keyed by the globally unique `tool_use_id`, or the
   windows overwrite each other.
-- A window has no newest edge to protect, so it runs with `--preserve 1`.
+- The last window carries the live end of the session, so it keeps the full
+  `--preserve` count; every other window runs with `--preserve 1`, having no
+  newest edge of its own.
+
+## Two ways a real transcript lies
+
+Both of these were found by running against a real 3,845-message session, and
+both produced a wrong result before they were fixed. Neither is a Jev problem.
+
+### 1. The database holds several generations of the same conversation
+
+Loading every row in `id` order gave a conversation that never happened. On that
+session: **1,852 tool results for only 1,127 distinct call ids** (682 ids twice,
+22 three times), and of 3,818 messages **only 206 were flagged `active = 1`** —
+all of them at the very end. Retries and rewinds store the same call again.
+
+The library pairs one call with one result, so the extra copies became orphans:
+the first attempt reported **613 orphaned results** and judged only 61% of the
+calls. The fix is to keep each `tool_call_id` and each call exactly once, first
+occurrence, and to report how many rows that skipped:
+
+```
+Aus der DB   : 3827 Zeilen gelesen, 1454 Doppel (Wiederholungen) entfernt
+```
+
+### 2. The last window is the live end, not old history
+
+Windowed mode originally ran every window with `--preserve 1`. For every window
+but the last that is right — a window has no newest edge to protect. The last
+window contains the live end of the session, so flattening it means treating the
+newest messages as old history.
+
+That cost one result from an `active = 1` message: its call survived, its result
+did not. The last window now keeps the full `--preserve` count, and the
+invariant is additionally enforced after the fact — a result whose call is gone
+is removed, and the report says so — instead of trusting the library's
+ordering-based pairing:
+
+```
+Abgleich     : 0 hängengebliebene Ergebnisse entfernt (Quelle bringt 1 Call(s) ohne Ergebnis mit)
+Konsistenz   : verwaiste Ergebnisse 0, verwaiste Calls 1 (wie in der Quelle)
+```
+
+A call without a result is not damage: that is how it stands in the source
+(an interrupted turn), and it is reported as inherited rather than as a fault.
 
 ## Measured results
 
-Reduction on real Hermes sessions, all with `Konsistenz = 0` and
+Reduction on real Hermes sessions, all with `Konsistenz` clean and
 `Integrität = true`:
 
+- **steuerberatung.ch working session** — 2,755 messages, 1,143 calls: 2,755 → 1,268 messages, 4,127,809 → 1,321,047 characters, **68.0%**; all 139 state-changing calls preserved (`patch` 76, `write_file` 36, `memory` 17, `skill_manage` 10); every emitted text byte-identical to the source
 - browser-automation session — 1,128 calls, 2,242 → 17 messages, 921,326 → 14,379 characters, **98.4%**
 - mixed session — 116 calls, 236 → 11 messages, **96.5%**
 - substantive session — 54 calls, 82 → 11 messages, **91.6%**
