@@ -1,0 +1,37 @@
+{
+  "name": "jev-compaction",
+  "version": "1.0.0",
+  "description": "Context compaction for Hermes sessions that never summarises: every tool call is scored by TypeSafe's Jev model, and only stale calls and results are removed or truncated.",
+  "type": "module",
+  "bin": {
+    "jev-compact": "./hermes-compact.mjs"
+  },
+  "files": [
+    "hermes-compact.mjs",
+    "SKILL.md",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "setup.sh"
+  ],
+  "scripts": {
+    "setup": "./setup.sh",
+    "verify": "node -e \"import('./src-repo/dist/index.js').then(m => console.log('upstream exports:', Object.keys(m).length))\""
+  },
+  "keywords": [
+    "hermes",
+    "agent",
+    "context",
+    "compaction",
+    "typesafe",
+    "jev",
+    "system-one",
+    "llm"
+  ],
+  "author": "Pino (picaye)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true
+}

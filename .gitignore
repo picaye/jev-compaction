@@ -1,0 +1,13 @@
+# Upstream library, cloned and built by setup.sh — never committed.
+src-repo/
+
+# Local working output
+out/
+
+# Node
+node_modules/
+npm-debug.log*
+.npm/
+
+# macOS
+.DS_Store

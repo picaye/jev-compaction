@@ -1,0 +1,28 @@
+NOTICE
+======
+
+This project is a derivative work. It adapts the algorithm and API client of:
+
+    fast-jev-compaction
+    https://github.com/tamaratran/fast-jev-compaction
+    Copyright (c) Allie Laabs
+    Licensed under the MIT License
+
+The upstream source is not vendored in this repository. `setup.sh` clones and
+builds it from its own repository, so upstream remains the single source of
+truth for the compaction algorithm and cannot go stale inside a fork.
+
+What this repository adds on top of upstream:
+
+  - `hermes-compact.mjs` — an adapter for the Hermes transcript format
+    (`role: user | assistant | tool`, tool results as their own messages,
+    `tool_calls[].function.arguments` as a JSON string), plus in-place pruning
+    of the original messages so that ids, reasoning fields and metadata survive.
+  - Windowing for transcripts too large for a single request ("history too large
+    for Jev"). Upstream throws; this adapter splits the transcript into windows.
+  - The `PROTECTED_TOOLS` policy: state-changing calls are never removed, because
+    Jev's judgement is not stable across sessions.
+  - `SKILL.md` — the skill that makes the tool available to a Hermes agent.
+
+TypeSafe, Jev and System One are products of TypeSafe (https://typesafe.ai).
+This project is not affiliated with or endorsed by TypeSafe.
